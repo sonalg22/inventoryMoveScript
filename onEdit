@@ -1,0 +1,86 @@
+function onEdit(e) {
+    var range = e.range;
+    var sheet = range.getSheet();
+    var sheetName = sheet.getName();
+
+        if (sheetName.startsWith('MK')) {
+        var col = range.getColumn();
+        var row = range.getRow();
+        
+        // find column indexes
+        var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]; 
+        var usedForProductionCol = headers.indexOf("Used for Production") + 1; 
+        var moveCol = headers.indexOf("Move") + 1; 
+        
+        // is edited cell in ufp column?
+        if (col === usedForProductionCol && row > 1) {
+            var value = range.getValue();  
+
+            // does move have a checkbox?
+            var moveCell = sheet.getRange(row, moveCol);
+            if (!moveCell.getDataValidation() || moveCell.getDataValidation().getCriteriaType() !== SpreadsheetApp.DataValidationCriteria.CHECKBOX) {
+                moveCell.setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+            }
+
+            // checked or unchecked box
+            moveCell.setValue(value ? true : false);
+        }
+    }
+
+    if (sheetName === 'updated_quantities') {
+        var col = range.getColumn();
+        var row = range.getRow();
+
+        if (col === 4 && row > 1) {
+            var inventorySheet = sheet;
+            var inventoryPartNumber = inventorySheet.getRange(row, 1).getValue();
+            var inventoryLotNumber = inventorySheet.getRange(row, 10).getValue();
+            var inventoryLocation = inventorySheet.getRange(row, 3).getValue();
+            var inventoryQty = inventorySheet.getRange(row, 4).getValue();
+            var inventoryPartUOM = inventorySheet.getRange(row, 5).getValue();
+            var inventoryDescription = inventorySheet.getRange(row, 2).getValue();
+            var inventoryTotalQty = inventorySheet.getRange(row, 12).getValue();
+            var inventoryVendorUOM = inventorySheet.getRange(row, 14).getValue();
+
+            var key = inventoryPartNumber + '-' + inventoryLotNumber + '-' + inventoryDescription;
+            var masterDataSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('master_data');
+            var masterDataRange = masterDataSheet.getDataRange();
+            var masterDataValues = masterDataRange.getValues();
+
+            var masterRow = masterDataValues.find(function(row) {
+                return row[4] === inventoryPartNumber && row[2] === inventoryLotNumber;
+            });
+
+            if (masterRow) {
+                masterRow[18] = inventoryQty;
+                masterRow[1] = inventoryLocation;
+
+                var newQtyCase = (inventoryVendorUOM && inventoryQty) ? (inventoryQty / inventoryVendorUOM) : null;
+                masterRow[19] = newQtyCase;
+
+                var newTotalCase = (inventoryVendorUOM && inventoryTotalQty) ? (inventoryTotalQty / inventoryVendorUOM) : null;
+                masterRow[21] = newTotalCase;
+
+                masterDataRange.setValues(masterDataValues);
+                formatMasterData();
+            } else {
+                var newRow = [
+                    '', // Master MO Number
+                    inventoryLocation,
+                    inventoryLotNumber,
+                    inventoryPartNumber,
+                    inventoryPartUOM,
+                    '', // Master Vendor UOM
+                    '', // Master Part Count
+                    inventoryQty,
+                    '', // New Qty Case
+                    inventoryTotalQty,
+                    '' // New Total Case
+                ];
+
+                var lastRow = masterDataSheet.getLastRow() + 1;
+                masterDataSheet.getRange(lastRow, 1, 1, newRow.length).setValues([newRow]);
+            }
+        }
+    }
+}

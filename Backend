@@ -1,0 +1,176 @@
+function syncMoveCheckboxes(sheetName) {
+  // get sheet and metadata
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) {
+    Logger.log("Sheet not found: " + sheetName);
+    return;
+  }
+  
+  // get header values from the first row
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var ufpColIndex = headers.indexOf("Used for Production") + 1;  // 1-based index
+  var moveColIndex = headers.indexOf("Move") + 1;
+  
+  if (ufpColIndex === 0 || moveColIndex === 0) {
+    Logger.log("Required columns not found.");
+    return;
+  }
+  
+  // find the last row with data (starting at row 2, since row 1 is header)
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  
+  // get the entire UFP range (from row 2 to last row)
+  var ufpRange = sheet.getRange(2, ufpColIndex, lastRow - 1, 1);
+  var ufpValues = ufpRange.getValues();
+  
+  // get the entire Move range (from row 2 to last row)
+  var moveRange = sheet.getRange(2, moveColIndex, lastRow - 1, 1);
+  
+  // make an array for new Move values
+  var newMoveValues = [];
+  
+  // loop through each UFP cell
+  for (var i = 0; i < ufpValues.length; i++) {
+    var cellValue = ufpValues[i][0];
+    // checkbox logic.
+    if (cellValue && cellValue.toString().trim() !== "") {
+      newMoveValues.push([true]);  // checked
+    } else {
+      newMoveValues.push([""]);    // clear the cell
+    }
+  }
+  
+  // set the new Move values back to the sheet
+  moveRange.setValues(newMoveValues);
+  
+  // mini check
+  // reapply checkbox data validation to the entire Move range if needed:
+  var rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+  moveRange.setDataValidation(rule);
+  
+  Logger.log("Sync complete on sheet: " + sheetName);
+
+  // correctly check/uncheck the first selected cell if it exists
+  if (firstAffectedRow !== null) {
+    var firstUfpCell = sheet.getRange(firstAffectedRow, ufpColIndex);
+    var firstMoveCell = sheet.getRange(firstAffectedRow, moveColIndex);
+    var firstUfpValue = firstUfpCell.getValue();
+
+    firstMoveCell.setValue(firstUfpValue && firstUfpValue.toString().trim() !== "" ? true : "");
+    firstMoveCell.setDataValidation(rule);
+    
+    Logger.log("Rechecked first affected row: " + firstAffectedRow);
+  }
+}
+
+
+function onEdit(e) {
+  if (!e) return; 
+
+  var range = e.range;
+  var sheet = range.getSheet();
+  var sheetName = sheet.getName();
+
+  if (sheetName.startsWith('MK')) {
+    var sheet = e.source.getActiveSheet();
+
+    syncMoveCheckboxes(sheetName);
+    var col = range.getColumn();
+    var row = range.getRow();
+    
+    // get header row values to find column indexes
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]; 
+    var usedForProductionCol = headers.indexOf("Used for Production") + 1; 
+    var moveCol = headers.indexOf("Move") + 1; 
+
+    
+    
+    // only act if the edited cell is in the UFP column (not header)
+    if (col === usedForProductionCol && row > 1) {
+      var uopCell = sheet.getRange(row, usedForProductionCol);
+      var moveCell = sheet.getRange(row, moveCol);
+      
+      // clear the UOP cell if it contains any value
+      if (uopCell.getValue() !== "") {
+        uopCell.clearContent();
+      }
+      
+      // ensure the Move cell has checkbox validation
+      var dv = moveCell.getDataValidation();
+      if (!dv || dv.getCriteriaType() !== SpreadsheetApp.DataValidationCriteria.CHECKBOX) {
+        var rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+        moveCell.setDataValidation(rule);
+      }
+      
+      // Checks box only if the user has just entered a value in UFP
+      // UFP was cleared above, so check if the edit event has a new value
+      var newValue = e.value; // This is the new value entered (if any)
+      if (newValue && newValue.toString().trim() !== "") {
+        // set UOP to new value and check the checkbox
+        uopCell.setValue(newValue);
+        moveCell.setValue(true);
+      } else {
+        // otherwise, leave UFP empty and uncheck the checkbox
+        moveCell.setValue(false);
+      }
+    }
+  }
+
+    if (sheetName === 'updated_quantities') {
+        var col = range.getColumn();
+        var row = range.getRow();
+
+        if (col === 4 && row > 1) {
+            var inventorySheet = sheet;
+            var inventoryPartNumber = inventorySheet.getRange(row, 1).getValue();
+            var inventoryLotNumber = inventorySheet.getRange(row, 10).getValue();
+            var inventoryLocation = inventorySheet.getRange(row, 3).getValue();
+            var inventoryQty = inventorySheet.getRange(row, 4).getValue();
+            var inventoryPartUOM = inventorySheet.getRange(row, 5).getValue();
+            var inventoryDescription = inventorySheet.getRange(row, 2).getValue();
+            var inventoryTotalQty = inventorySheet.getRange(row, 12).getValue();
+            var inventoryVendorUOM = inventorySheet.getRange(row, 14).getValue();
+
+            var key = inventoryPartNumber + '-' + inventoryLotNumber + '-' + inventoryDescription;
+            var masterDataSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('master_data');
+            var masterDataRange = masterDataSheet.getDataRange();
+            var masterDataValues = masterDataRange.getValues();
+
+            var masterRow = masterDataValues.find(function(row) {
+                return row[4] === inventoryPartNumber && row[2] === inventoryLotNumber;
+            });
+
+            if (masterRow) {
+                masterRow[18] = inventoryQty;
+                masterRow[1] = inventoryLocation;
+
+                var newQtyCase = (inventoryVendorUOM && inventoryQty) ? (inventoryQty / inventoryVendorUOM) : null;
+                masterRow[19] = newQtyCase;
+
+                var newTotalCase = (inventoryVendorUOM && inventoryTotalQty) ? (inventoryTotalQty / inventoryVendorUOM) : null;
+                masterRow[21] = newTotalCase;
+
+                masterDataRange.setValues(masterDataValues);
+                formatMasterData();
+            } else {
+                var newRow = [
+                    '', // Master MO Number
+                    inventoryLocation,
+                    inventoryLotNumber,
+                    inventoryPartNumber,
+                    inventoryPartUOM,
+                    '', // Master Vendor UOM
+                    '', // Master Part Count
+                    inventoryQty,
+                    '', // New Qty Case
+                    inventoryTotalQty,
+                    '' // New Total Case
+                ];
+
+                var lastRow = masterDataSheet.getLastRow() + 1;
+                masterDataSheet.getRange(lastRow, 1, 1, newRow.length).setValues([newRow]);
+            }
+        }
+    }
+}
